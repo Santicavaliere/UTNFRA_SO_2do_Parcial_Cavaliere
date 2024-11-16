@@ -1,63 +1,82 @@
-#!/bin/bash
-
 sudo mkdir -p /usr/local/bin/Cavaliere
 sudo vim /usr/local/bin/Cavaliere/AltaUser-Groups.sh
 #!/bin/bash
 
-# En este paso validamos parámetros
+# Acá se verifica que se proporcionen los dos parámetros necesarios
 if [ "$#" -ne 2 ]; then
-  echo "Uso: $0 <usuario_existente> <ruta_lista_usuarios>"
-  exit 1
+    echo "Uso: $0 <Usuario_para_clave> <Ruta_Lista_Usuarios>"
+    exit 1
 fi
 
-USER_EXISTENTE="$1"
-LISTA_USUARIOS="$2"
+# Se asignan los parámetros a variables
+USER_PASSWORD_SOURCE=$1
+USER_LIST_FILE=$2
 
-# Acá validamos que el usuario existe
-if ! id "$USER_EXISTENTE" &>/dev/null; then
-  echo "El usuario $USER_EXISTENTE no existe."
-  exit 1
+# Acá verfiicamos que el archivo con la lista de usuarios exista
+if [ ! -f "$USER_LIST_FILE" ]; then
+    echo "Error: El archivo $USER_LIST_FILE no existe."
+    exit 1
 fi
 
-# Acá validamos que el archivo existe
-if [ ! -f "$LISTA_USUARIOS" ]; then
-  echo "El archivo $LISTA_USUARIOS no existe."
-  exit 1
+# Vamos a verificar que el usuario del cual se obtendrá la clave exista
+if ! id "$USER_PASSWORD_SOURCE" &>/dev/null; then
+    echo "Error: El usuario $USER_PASSWORD_SOURCE no existe."
+    exit 1
 fi
 
-# Contraseña del usuario existente
-PASSWORD=$(sudo getent shadow "$USER_EXISTENTE" | cut -d':' -f2)
-if [ -z "$PASSWORD" ]; then
-  echo "No se pudo obtener la contraseña del usuario $USER_EXISTENTE."
-  exit 1
+# A continuación, obtenemos la clave del usuario
+USER_PASSWORD=$(sudo getent shadow "$USER_PASSWORD_SOURCE" | cut -d: -f2)
+if [ -z "$USER_PASSWORD" ]; then
+    echo "Error: No se pudo obtener la clave del usuario $USER_PASSWORD_SOURCE."
+    exit 1
 fi
 
-# Crear grupos y usuarios pero antes leer el archivo de usuarios
-while IFS=, read -r GRUPO USUARIO; do
-  # Crear grupo si no existe
-  if ! getent group "$GRUPO" &>/dev/null; then
-    sudo groupadd "$GRUPO"
-    echo "Grupo $GRUPO creado."
-  else
-    echo "Grupo $GRUPO ya existe."
-  fi
+# Procesamos el archivo de usuarios
+while IFS=',' read -r USERNAME GROUPNAME HOMEDIR; do
+    # Ignorar líneas vacías o líneas que comienzan con "#"
+    [[ "$USERNAME" =~ ^#.*$ || -z "$USERNAME" ]] && continue
 
-  # Crear usuario si no existe
-  if ! id "$USUARIO" &>/dev/null; then
-    sudo useradd -m -g "$GRUPO" -p "$PASSWORD" "$USUARIO"
-    echo "Usuario $USUARIO creado y asignado al grupo $GRUPO."
-  else
-    echo "Usuario $USUARIO ya existe."
-  fi
-done < "$LISTA_USUARIOS"
+    # Validamos que el formato sea correcto
+    if [ -z "$GROUPNAME" ] || [ -z "$HOMEDIR" ]; then
+        echo "Error: Formato inválido en la línea: $USERNAME,$GROUPNAME,$HOMEDIR"
+        continue
+    fi
 
-echo "Finalizado"
+    # Si no existe el grupo, se crea
+    if ! getent group "$GROUPNAME" &>/dev/null; then
+        echo "Creando grupo: $GROUPNAME"
+        sudo groupadd "$GROUPNAME"
+        if [ $? -ne 0 ]; then
+            echo "Error: No se pudo crear el grupo $GROUPNAME."
+            continue
+        fi
+    else
+        echo "El grupo $GROUPNAME ya existe."
+    fi
+
+    # Crear el usuario si no existe
+    if ! id "$USERNAME" &>/dev/null; then
+        echo "Creando usuario: $USERNAME con directorio home: $HOMEDIR"
+        sudo useradd -m -g "$GROUPNAME" -d "$HOMEDIR" -s /bin/bash "$USERNAME"
+        if [ $? -ne 0 ]; then
+            echo "Error: No se pudo crear el usuario $USERNAME."
+            continue
+        fi
+
+        # Asignar la contraseña al usuario
+        echo "$USERNAME:$USER_PASSWORD" | sudo chpasswd -e
+        if [ $? -ne 0 ]; then
+            echo "Error: No se pudo asignar la clave al usuario $USERNAME."
+            continue
+        fi
+
+        echo "Usuario $USERNAME creado, asignado al grupo $GROUPNAME y con directorio home $HOMEDIR."
+    else
+        echo "El usuario $USERNAME ya existe."
+    fi
+done < "$USER_LIST_FILE"
+
+echo "Finalizado."
 sudo chmod +x /usr/local/bin/Cavaliere/AltaUser-Groups.sh
-mkdir -p /home/vagrant/RTA_Examen_20241114/202406/bash_script
-vim /home/vagrant/RTA_Examen_20241114/202406/bash_script/Lista_Usuarios.txt
-i
-grupo1,usuario1
-grupo2,usuario2
-grupo3,usuario3
-:wq
+sudo /usr/local/bin/Cavaliere/AltaUser-Groups.sh vagrant ~/UTN-FRA_SO_Examenes/202406/bash_script/Lista_Usuarios.txt
 
