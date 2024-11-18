@@ -1,3 +1,4 @@
+# Pasos que realicé para hacer el ejercicio C
 
 cat index.html
 
